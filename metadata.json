@@ -1,0 +1,9 @@
+{
+  "name": "AgriLux AI - Precision Farming Intelligence",
+  "description": "A prestigious, AI-powered precision farming platform designed for large-scale agricultural optimization and sustainability reporting for global NGOs and governments.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
