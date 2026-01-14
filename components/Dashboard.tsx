@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip 
 } from 'recharts';
-import { Droplets, Thermometer, Wind, Zap, TrendingUp, ShieldCheck, Globe, Search, Info, LockKeyhole, Beaker, FlaskConical } from 'lucide-react';
+import { Droplets, Thermometer, Wind, Zap, TrendingUp, ShieldCheck, Globe, Search, Info, LockKeyhole, Beaker, FlaskConical, RefreshCw, Loader2, AlertCircle } from 'lucide-react';
 import { PlanTier, SensorData } from '../types';
 
 const mockChartData = [
@@ -41,9 +41,19 @@ interface DashboardProps {
   securityAlerts?: any[];
   climateOutlook?: string;
   userPlan: PlanTier;
+  onRefreshClimate?: () => void;
+  isClimateLoading?: boolean;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ sensors, batteryThreshold, securityAlerts = [], climateOutlook, userPlan }) => {
+const Dashboard: React.FC<DashboardProps> = ({ 
+  sensors, 
+  batteryThreshold, 
+  securityAlerts = [], 
+  climateOutlook, 
+  userPlan, 
+  onRefreshClimate, 
+  isClimateLoading 
+}) => {
   const isBTE = userPlan === 'Boutique Estate';
 
   // Dynamic KPI Calculation
@@ -113,9 +123,14 @@ const Dashboard: React.FC<DashboardProps> = ({ sensors, batteryThreshold, securi
               </p>
             </div>
             {!isBTE && (
-              <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-400 bg-emerald-500/5 px-3 py-1 rounded-full border border-emerald-500/10">
-                 <Search size={12} /> Google Grounded
-              </div>
+              <button 
+                onClick={onRefreshClimate}
+                disabled={isClimateLoading}
+                className="flex items-center gap-2 text-[10px] font-bold text-emerald-400 bg-emerald-500/5 px-3 py-1.5 rounded-full border border-emerald-500/10 hover:bg-emerald-500/10 transition-all disabled:opacity-50"
+              >
+                 {isClimateLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                 {isClimateLoading ? 'Grounding...' : 'Sync Satellite'}
+              </button>
             )}
           </div>
           
@@ -125,8 +140,14 @@ const Dashboard: React.FC<DashboardProps> = ({ sensors, batteryThreshold, securi
                   <LockKeyhole size={24} className="text-slate-500" />
                   <p className="text-xs uppercase tracking-widest font-bold text-slate-500">Upgrade for Satellite Intelligence</p>
                </div>
+             ) : isClimateLoading ? (
+               <div className="flex flex-col items-center gap-3 opacity-80 py-8">
+                  <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+                  <p className="text-xs uppercase tracking-[0.2em] font-bold text-emerald-500">Synchronizing Satellite Link...</p>
+                  <p className="text-[9px] text-slate-400 font-mono">Fetching High-Fidelity NOAA Data</p>
+               </div>
              ) : climateOutlook ? (
-               <div className="space-y-4">
+               <div className="space-y-4 animate-in fade-in duration-500">
                  <p className="text-slate-300 text-sm leading-relaxed font-light italic">
                    "{climateOutlook}"
                  </p>
@@ -136,9 +157,10 @@ const Dashboard: React.FC<DashboardProps> = ({ sensors, batteryThreshold, securi
                  </div>
                </div>
              ) : (
-               <div className="flex flex-col items-center gap-3 opacity-30 py-8">
-                  <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
-                  <p className="text-xs uppercase tracking-[0.2em] font-bold">Synchronizing Satellite Link...</p>
+               <div className="flex flex-col items-center gap-3 opacity-40 py-8">
+                  <AlertCircle size={24} className="text-slate-500" />
+                  <p className="text-xs uppercase tracking-[0.2em] font-bold text-slate-500">Climate Data Unavailable</p>
+                  <p className="text-[9px] text-slate-600 font-mono">Click Sync to Retry Uplink</p>
                </div>
              )}
           </div>

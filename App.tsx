@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const [securityAlerts, setSecurityAlerts] = useState<any[]>([]);
   const [globalThreat, setGlobalThreat] = useState<any>(null);
   const [isSentinelScanning, setIsSentinelScanning] = useState(false);
+  const [isClimateLoading, setIsClimateLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -82,23 +83,37 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
+  const refreshClimate = useCallback(async (forcedLoc?: {lat: number, lng: number}) => {
+    const loc = forcedLoc || userLocation;
+    if (!loc) return;
+    setIsClimateLoading(true);
+    try {
+      const outlook = await getClimateVerification(loc.lat, loc.lng);
+      setClimateOutlook(outlook);
+    } catch (err) {
+      console.error("Climate sync failed", err);
+    } finally {
+      setIsClimateLoading(false);
+    }
+  }, [userLocation]);
+
   useEffect(() => {
     if (isAuthenticated && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setUserLocation(loc);
-          try {
-            const outlook = await getClimateVerification(loc.lat, loc.lng);
-            setClimateOutlook(outlook);
-          } catch (err) {
-            console.warn("Initial climate verification bypassed.");
-          }
+          refreshClimate(loc);
         },
-        (err) => console.warn("Location access denied.")
+        (err) => {
+          console.warn("Location access denied. Using fallback coordinates.");
+          const fallback = { lat: -1.2863, lng: 36.8172 };
+          setUserLocation(fallback);
+          refreshClimate(fallback);
+        }
       );
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshClimate]);
 
   const runSentinelScan = useCallback(async () => {
     if (!isAuthenticated || (userPlan !== 'Sovereign Protocol' && userPlan !== 'Master')) return;
@@ -134,7 +149,15 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard sensors={sensors} batteryThreshold={batteryThreshold} securityAlerts={securityAlerts} climateOutlook={climateOutlook} userPlan={userPlan} />;
+        return <Dashboard 
+          sensors={sensors} 
+          batteryThreshold={batteryThreshold} 
+          securityAlerts={securityAlerts} 
+          climateOutlook={climateOutlook} 
+          userPlan={userPlan} 
+          onRefreshClimate={() => refreshClimate()}
+          isClimateLoading={isClimateLoading}
+        />;
       case 'scout':
         return <LiveScout userPlan={userPlan} />;
       case 'crops':
