@@ -90,7 +90,7 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [transcriptions, setTranscriptions] = useState<TranscriptItem[]>([]);
   const [aiStatus, setAiStatus] = useState<string>('Standby');
-  const [hasApiKey, setHasApiKey] = useState(!!process.env.API_KEY);
+  const [errorState, setErrorState] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -101,34 +101,6 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
   const transcriptionBufferRef = useRef({ user: '', ai: '' });
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-
-  useEffect(() => {
-    const checkKey = async () => {
-      if (process.env.API_KEY) {
-        setHasApiKey(true);
-      } else if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-        setHasApiKey(true);
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-      try {
-        await window.aistudio.openSelectKey();
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(hasKey);
-        setAiStatus(hasKey ? 'Neural Handshake Initiated' : 'Auth Cancelled');
-        return hasKey;
-      } catch (err) {
-        console.error("Key selection failed", err);
-        setAiStatus('Auth Refused');
-        return false;
-      }
-    }
-    return false;
-  };
 
   const decodeAudioData = async (data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> => {
     const dataInt16 = new Int16Array(data.buffer);
@@ -194,21 +166,17 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
   }, []);
 
   const startSession = async () => {
-    // Check if we need to prompt for a key selection
-    if (!process.env.API_KEY && window.aistudio) {
-      const isKeySelected = await window.aistudio.hasSelectedApiKey();
-      if (!isKeySelected) {
-        const success = await handleSelectKey();
-        if (!success) {
-           setAiStatus('Auth Required: Select Key to Proceed');
-           return;
-        }
-      }
-    }
-
     setIsConnecting(true);
+    setErrorState(null);
     setAiStatus('Establishing Neural Link...');
+
     try {
+      // Initialize Audio Context immediately to bypass browser autoplay policies
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: true, 
         video: { facingMode: 'environment', width: 640, height: 480 } 
@@ -216,8 +184,11 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
+      if (!process.env.API_KEY) {
+        throw new Error("Sovereign API Key missing in environment.");
+      }
+
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const inputContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
 
       const sessionPromise = ai.live.connect({
@@ -317,7 +288,7 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
           onclose: () => stopSession(),
           onerror: (e: any) => {
             console.error("Live Link Error", e);
-            setAiStatus('Neural Link Error');
+            setErrorState("Neural Link Severed: Connection to Sovereign Mesh failed.");
             stopSession();
           }
         }
@@ -325,16 +296,9 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
       sessionRef.current = await sessionPromise;
     } catch (err: any) {
       console.error(err);
-      const msg = err?.message || JSON.stringify(err);
-      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
-        setAiStatus('Quota Exceeded (Limit Reached)');
-      } else if (msg.includes("Requested entity was not found")) {
-        setHasApiKey(false);
-        setAiStatus('Select Valid Neural Key');
-      } else {
-        setAiStatus('Connection Refused');
-      }
-      stopSession();
+      setErrorState(`Connection Failed: ${err.message || 'Unknown Protocol Error'}`);
+      setIsConnecting(false);
+      setAiStatus('Connection Failed');
     }
   };
 
@@ -354,15 +318,7 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
         </div>
         
         <div className="flex gap-4">
-          {!hasApiKey ? (
-            <button 
-              onClick={handleSelectKey}
-              className="px-10 py-5 rounded-2xl bg-amber-500 text-slate-900 font-bold flex items-center gap-3 gold-glow hover:bg-amber-400 transition-all group"
-            >
-              <Key size={20} className="group-hover:rotate-12 transition-transform" />
-              Authorize Neural Engine
-            </button>
-          ) : !isActive ? (
+           {!isActive ? (
             <button 
               onClick={startSession}
               disabled={isConnecting}
@@ -381,6 +337,13 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
           )}
         </div>
       </div>
+      
+      {errorState && (
+         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center gap-3 animate-in slide-in-from-top-4">
+            <AlertTriangle size={20} />
+            <span className="text-xs font-bold uppercase tracking-widest">{errorState}</span>
+         </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
@@ -394,26 +357,19 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
             />
             <canvas ref={canvasRef} width="640" height="480" className="hidden" />
 
-            {/* NEW HARDWARE HUD */}
             <HardwareHUD isActive={isActive} />
 
             {!isActive && !isConnecting && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-12 space-y-4 opacity-40 group-hover:opacity-60 transition-opacity">
-                {aiStatus.includes("Quota") ? (
-                    <div className="w-24 h-24 rounded-full border-2 border-red-500/50 flex items-center justify-center text-red-500 animate-pulse">
-                        <AlertTriangle size={48} />
-                    </div>
-                ) : (
-                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-emerald-500/30 flex items-center justify-center text-emerald-500">
-                        <Video size={48} />
-                    </div>
-                )}
+                <div className="w-24 h-24 rounded-full border-2 border-dashed border-emerald-500/30 flex items-center justify-center text-emerald-500">
+                    <Video size={48} />
+                </div>
                 <div>
-                    <p className={`text-sm font-bold uppercase tracking-[0.4em] ${aiStatus.includes("Quota") ? "text-red-500" : "text-slate-500"}`}>
-                        {aiStatus.includes("Quota") ? "SYSTEM OVERLOAD" : "Uplink Status: Disconnected"}
+                    <p className="text-sm font-bold uppercase tracking-[0.4em] text-slate-500">
+                        Uplink Status: Disconnected
                     </p>
                     <p className="text-[10px] text-slate-600 mt-2 italic">
-                        {aiStatus.includes("Quota") ? "Daily Neural Limit Exceeded. Contact Billing or Wait 24h." : "Awaiting Operator Command to Initialize Neural Feed"}
+                        Awaiting Operator Command to Initialize Neural Feed
                     </p>
                 </div>
               </div>
@@ -506,7 +462,7 @@ const LiveScout: React.FC<LiveScoutProps> = ({ userPlan }) => {
                      <span className="text-[8px] font-bold text-emerald-400 uppercase">Hardware Secure</span>
                   </div>
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sentinel Link State</span>
-                  <p className={`text-xl font-bold uppercase tracking-tight ${isActive ? 'text-emerald-500 animate-pulse' : aiStatus.includes("Quota") ? 'text-red-500' : 'text-slate-700'}`}>{aiStatus}</p>
+                  <p className={`text-xl font-bold uppercase tracking-tight ${isActive ? 'text-emerald-500 animate-pulse' : errorState ? 'text-red-500' : 'text-slate-700'}`}>{aiStatus}</p>
                </div>
             </div>
           </div>
